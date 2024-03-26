@@ -1,11 +1,12 @@
 import boto3
 from log_setup import logger
 import json
+import os
 
 def lambda_handler(event, context):
     
-    agentId = "" #INPUT YOUR AGENT ID HERE
-    agentAliasId = "" # Hits draft alias, set to a specific alias id for a deployed version
+    agentId = os.environ['AGENT_ID'] #INPUT YOUR AGENT ID HERE
+    agentAliasId = os.environ['AGENT_ALIAS_ID'] # Hits draft alias, set to a specific alias id for a deployed version
     sessionId = event["sessionId"]
     question = event["question"]
     endSession = False

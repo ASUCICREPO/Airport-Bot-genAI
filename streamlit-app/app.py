@@ -5,9 +5,18 @@ import string
 import random
 import time
 from log_setup import logger
+import os
+
+Airport_agent = os.environ['PAGE_TITLE']
+website = os.environ['WEBSITE']
+
+if website.startswith('https://') or website.startswith('http://'):
+    linksite = website
+else:
+    linksite = 'http://' + website
 
 # Streamlit page configuration
-st.set_page_config(page_title="JFK Airport Agent", page_icon="💬", layout="wide")
+st.set_page_config(page_title=Airport_agent, page_icon="💬", layout="wide")
     
 def generate_random_string(length):
     logger.info('Creating Random ID ..')
@@ -22,8 +31,8 @@ if "history" not in st.session_state:
     logger.info('New History Created !!')
 
 #Title and Disclaimer
-st.markdown("<h1 style='font-family: sans-serif;'>JFK Airport Agent</h1>", unsafe_allow_html=True)
-st.markdown("<p style='color: #FF0000;'>This website is only for demo purposes. Visit the official website at <a href='https://jfkairport.com'>jfkairport.com</a></p>", unsafe_allow_html=True)
+st.markdown(f"<h1 style='font-family: sans-serif;'>{Airport_agent}</h1>", unsafe_allow_html=True)
+st.markdown(f"<p style='color: #FF0000;'>This website is only for demo purposes. Visit the official website at <a href={linksite}>{website}</a></p>", unsafe_allow_html=True)
 
 
 st.sidebar.title("**FAQs:**")
