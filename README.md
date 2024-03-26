@@ -29,7 +29,9 @@ Enter Account, Region Information in `bin/cdk-typescript.ts`
 Check that your system has access to make AWS calls , then run the cdk stack.
 
 **kendraIndexId**: Index which has a crawler data source which will crawl the website and indexes the content. **Optional**
+
 **website**: website link which will be added in the data source if not already provided otherwise in a disclaimer for users. **Mandatory**
+
 **page_title**: Set page title of the frontend. **Mandatory**
 ```bash
   cdk synth --context kendraIndexId=123456677890 --context website='abc.com' --context page_title='Phoenix Airport Bot'
