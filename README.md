@@ -27,6 +27,7 @@ Enter Account, Region Information in `bin/cdk-typescript.ts`
   env: { account: '', region: '' }
 ```
 Check that your system has access to make AWS calls , then run the cdk stack.
+
 **kendraIndexId**: Index which has a crawler data source which will crawl the website and indexes the content. **Optional**
 **website**: website link which will be added in the data source if not already provided otherwise in a disclaimer for users. **Mandatory**
 **page_title**: Set page title of the frontend. **Mandatory**
