@@ -1,9 +1,3 @@
----
-runme:
-  id: 01HTZEMSE9DJB4D5JMC8P2FWD5
-  version: v3
----
-
 # Airport-Bot-GenerativeAI
 
 GenerativeAI chatbot framework for Airports. This bot can provide all sorts of information which is publically available on the websites.
