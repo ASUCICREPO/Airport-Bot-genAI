@@ -9,15 +9,22 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs_patterns from 'aws-cdk-lib/aws-ecs-patterns';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import { SnsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+
 
 
 export class CdkTypescriptStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    if (process.env.CDK_DEFAULT_REGION != 'us-east-1'){
+      console.log('Only us-east-1 is supported for now, exiting...')
+      return process.exit(1)
+    }
     //Run-time Context
     let indexId = this.node.tryGetContext('kendraIndexId') ?? '';
-    const website = this.node.tryGetContext('website') ?? '';
+    let website = this.node.tryGetContext('website') ?? '';
     const page_title = this.node.tryGetContext('page_title') ?? '';
 
     if (indexId == '') {
@@ -30,6 +37,11 @@ export class CdkTypescriptStack extends cdk.Stack {
         roleArn: kendra_index_role,
       });
 
+      const pattern = /^(http|https):\/\//;
+      if (!pattern.test(website)) {
+        // Append 'http://' to the beginning of the URL
+        website = `https://${website}`;
+      }
       //Create a webcrawler data source and attach to above index
       const crawler_data_source = new kendra.CfnDataSource(this, 'airport-bot-crawler-data-source-ts', {
         indexId: kendraIndex.attrId,
@@ -42,14 +54,13 @@ export class CdkTypescriptStack extends cdk.Stack {
             urls:{
               seedUrlConfiguration:{
                 seedUrls: [website],
-                webCrawlerMode: 'EVERYTHING'
-              }
+                webCrawlerMode: 'EVERYTHING',
+              },
             },
             crawlDepth: 2
           }
         },
       });
-      crawler_data_source.schedule = '00***'
       crawler_data_source._addResourceDependency(kendraIndex)
       indexId = kendraIndex.attrId;
     }
@@ -312,6 +323,33 @@ export class CdkTypescriptStack extends cdk.Stack {
   });
   cloudFrontDist.cfnOptions.deletionPolicy = cdk.CfnDeletionPolicy.DELETE;
 
+  //Create an IAM role for Lambda function
+  const sms_lambda_role = this.sms_lambda_role()
+
+  //Create a Lambda function
+  const sms_lambda_function = new lambda.Function(this, 'airport-bot-sms-lambda', {
+    runtime: cdk.aws_lambda.Runtime.PYTHON_3_12,
+    code: cdk.aws_lambda.Code.fromAsset('../aws-Airport-Bot/sms-lambda-code'),
+    handler: 'index.lambda_handler',
+    role: sms_lambda_role,
+    environment: {
+      "AGENT_ID": agent.agentId,
+      "AGENT_ALIAS_ID": agent.aliasId ?? '',
+    },
+    memorySize: 500,
+    timeout: cdk.Duration.seconds(50),
+    description: "This lambda function processes incoming sms messages from user and makes bedrock calls",
+    ephemeralStorageSize: cdk.Size.mebibytes(512),
+    functionName: 'Airport-Bot'
+  
+    });
+
+    //Add existing sns topic as event source by name
+    const snsTopic = sns.Topic.fromTopicArn(this, 'airport-bot-sns-topic', `arn:aws:sns:${process.env.CDK_DEFAULT_REGION}:${process.env.CDK_DEFAULT_ACCOUNT}:Airport-Bot`);
+
+    //Add event source to lambda function
+    sms_lambda_function.addEventSource( new SnsEventSource(snsTopic));
+
   new cdk.CfnOutput(this, 'Cloud-Front-Domain', {
     value: cloudFrontDist.attrDomainName
   });
@@ -406,4 +444,45 @@ export class CdkTypescriptStack extends cdk.Stack {
    return lambda_role;
   }
 
-}
+  //////////////////////////////////////////////////////////////////////////////////////////////////////////
+  //Create an IAM role for Lambda function
+  sms_lambda_role(): iam.Role {
+    const lambda_role = new iam.Role(this, 'airport-bot-sms-lambda-role', {
+      assumedBy: new cdk.aws_iam.ServicePrincipal('lambda.amazonaws.com'),
+    })
+ 
+   // Policy Statement 1
+   const lambdaPolStat1 = new iam.PolicyStatement({
+     effect: iam.Effect.ALLOW,
+     actions: ['logs:CreateLogGroup'],
+     resources: ['*']
+   });
+ 
+   // Policy Statement 2
+   const lambdaPolStat2 = new iam.PolicyStatement({
+     effect: iam.Effect.ALLOW,
+     actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+     resources: ['*'],
+     conditions: {
+       StringEquals: {
+         'logs:ResourceTag/aws:cloudformation:stack-name': 'CdkAirportBotStack'
+       }
+     }
+   });
+ 
+   // Policy Statement 3
+   const lambdaPolStat3 = new iam.PolicyStatement({
+     effect: iam.Effect.ALLOW,
+     actions: ['bedrock:InvokeAgent', 'mobiletargeting:SendMessages'],
+     resources: ['*']
+   });
+ 
+   // Add the Policy statements to the Role
+   lambda_role.addToPolicy(lambdaPolStat1);
+   lambda_role.addToPolicy(lambdaPolStat2);
+   lambda_role.addToPolicy(lambdaPolStat3);
+ 
+    return lambda_role;
+   }
+ 
+ }
