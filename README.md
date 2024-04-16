@@ -1,8 +1,3 @@
----
-runme:
-  id: 01HVMF913NM0X37V35G7EAK3AJ
-  version: v3
----
 
 # Airport-Bot-GenerativeAI
 
