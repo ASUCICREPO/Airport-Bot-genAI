@@ -18,7 +18,7 @@ headers = {
         'sec-ch-ua-platform': '"macOS"',
     }
 
-def fetch_jfk_parking_data():
+def fetch_parking_data():
     url = 'https://avi-prod-mpp-webapp-api.azurewebsites.net/api/v1/parking/JFK'
     response = requests.get(url, headers=headers)
     
@@ -27,7 +27,7 @@ def fetch_jfk_parking_data():
     else:
         return f"Failed to fetch data", response.status_code
 
-def fetch_jfk_security_wait_times():
+def fetch_security_wait_times():
     url = 'https://avi-prod-mpp-webapp-api.azurewebsites.net/api/v1/SecurityWaitTimesPoints/JFK'
     response = requests.get(url, headers=headers)
     
@@ -108,7 +108,7 @@ def lambda_handler(event, context):
             response_body = {"application/json": {"body": "Can't find, please check the website." }}
         
     elif apiPath=="/parking_avail":
-        parking_data, response_code = fetch_jfk_parking_data()
+        parking_data, response_code = fetch_parking_data()
         terminal_to_find = event["parameters"][0]["value"]
         for inst in parking_data:
             terminal = inst["parkingLot"].split(' ')
@@ -119,7 +119,7 @@ def lambda_handler(event, context):
         if response_body is None:
             response_body = {"application/json": {"body": "Can't find, please check the website." }}
     elif apiPath=="/sec_wait_times":
-        sec_data, response_code = fetch_jfk_security_wait_times()
+        sec_data, response_code = fetch_security_wait_times()
         mapping = {
         "reg": "Reg",
         "general": "Reg",

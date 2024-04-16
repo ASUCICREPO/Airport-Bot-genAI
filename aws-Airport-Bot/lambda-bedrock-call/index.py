@@ -1,38 +1,37 @@
-import boto3
-from log_setup import logger
 import json
+import boto3
 import os
 
 def lambda_handler(event, context):
     
+    #Agent Configuration
     agentId = os.environ['AGENT_ID'] #INPUT YOUR AGENT ID HERE
     agentAliasId = os.environ['AGENT_ALIAS_ID'] # Hits draft alias, set to a specific alias id for a deployed version
-    sessionId = event["sessionId"]
-    question = event["question"]
+    sessionId = "MySession"
     endSession = False
+    prompt = json.loads(event['body'])['prompt']
     
-    logger.debug(f"Session: {sessionId} asked question: {question}")
     
-    client = boto3.client('bedrock-agent-runtime')
+    #Logic to invokeAgent
     try:
-        response = client.invoke_agent(
+        bedrockClient = boto3.client('bedrock-agent-runtime')
+        response = bedrockClient.invoke_agent(
             agentId=agentId,
             agentAliasId=agentAliasId,
             sessionId=sessionId,
             endSession=False,
             enableTrace=False,
-            inputText=question
+            inputText=prompt
             )
         resBody = response['completion']
         for line in resBody:
             answer = line['chunk']['bytes'].decode('utf-8')
-        return { 
-            "status_code": response['ResponseMetadata']['HTTPStatusCode'],
-            "body": json.dumps({"response": answer})
+        return {
+            "status_code": 200,
+            "body": json.dumps({"response": answer})  
         }
     except Exception as e:
-        logger.debug(e)
         return {
             "status_code": 500,
-            "body": json.dumps({"response": str(e)})  # "error": "Internal Server Error"
+            "body": json.dumps({"response": "Sorry we couldn't serve the request at this moment,\nPlease try again later !"})  # "error": "Internal Server Error"
         }

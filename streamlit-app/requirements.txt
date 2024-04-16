@@ -1,2 +1,2 @@
 streamlit
-boto3
+requests

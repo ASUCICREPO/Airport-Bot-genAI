@@ -1,4 +1,4 @@
-import InvokeAgent as agenthelper
+#import InvokeAgent as agenthelper
 import streamlit as st
 import json
 import string
@@ -6,9 +6,11 @@ import random
 import time
 from log_setup import logger
 import os
+import requests
 
 Airport_agent = os.environ['PAGE_TITLE']
 website = os.environ['WEBSITE']
+api = os.environ['API']
 
 if website.startswith('https://') or website.startswith('http://'):
     linksite = website
@@ -66,13 +68,13 @@ if prompt := st.chat_input("Ex.- What's the parking availability at terminal 8 ?
 
         event = {
             "sessionId": st.session_state.session_id,
-            "question": prompt
+            "prompt": prompt
         }
 
-        #Invoking Agent
-        response = agenthelper.lambda_handler(event, None)
-        responseJson = json.loads(response['body'])
-        the_response = responseJson['response']
+        #Hitting API
+        response = requests.post(api, json=event)
+        the_response = response.json()['body']
+        the_response = json.loads(the_response)['response']
         logger.debug(f'response: {the_response}')
 
         #Adding a small delay while displaying to make it like streaming

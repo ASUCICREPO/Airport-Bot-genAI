@@ -11,17 +11,13 @@ import * as ecs_patterns from 'aws-cdk-lib/aws-ecs-patterns';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import { SnsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
-
+import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 
 
 export class CdkTypescriptStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    if (process.env.CDK_DEFAULT_REGION != 'us-east-1'){
-      console.log('Only us-east-1 is supported for now, exiting...')
-      return process.exit(1)
-    }
     //Run-time Context
     let indexId = this.node.tryGetContext('kendraIndexId') ?? '';
     let website = this.node.tryGetContext('website') ?? '';
@@ -92,7 +88,7 @@ export class CdkTypescriptStack extends cdk.Stack {
       instruction: 'You are equipped with comprehensive data pertaining to John F. Kennedy International Airport (JFK) which is an International airport in New York, United States. Your primary objective is to respond to all queries in a professional manner, adopting the perspective of an individual situated at a window within JFK Airport. Check if the information being requested is for JFK airport, answer only if the information is related to the JFK airport, It is imperative that you refrain from addressing any inquiries unrelated to JFK Airport. You are only supposed to request the answer from your action group. You engage with people from all background so make sure you respond in a way everyone understand.',
       idleSessionTTL: cdk.Duration.minutes(15),
       shouldPrepareAgent: true,
-      description: 'Agent which can answers all the questions about JFK airport.',
+      description: 'Agent which can answers all the questions about Airport.',
       aliasName: 'v1'
     });
 
@@ -104,225 +100,39 @@ export class CdkTypescriptStack extends cdk.Stack {
       apiSchema: bedrock.ApiSchema.fromAsset('../api-doc/aws_bedrock_agent_openapi.json')
     });
 
-    // Frontend Container Image code
-    const asset = new DockerImageAsset(this, 'Airport-Bot-Image', {
-      directory: "../streamlit-app",
-    });
-
-    //VPC for the frontend
-    const vpc = new ec2.Vpc(this, 'VPC', {
-      vpcName: 'Airport-Bot-cdk-VPC',
-      maxAzs: 2,
-      natGateways: 0,
-      subnetConfiguration: [
-        {
-          cidrMask: 24,
-          name: 'Web',
-          subnetType: ec2.SubnetType.PUBLIC,
-        },],
-      
-    });
     
-    //ECS Cluster
-    const cluster = new ecs.Cluster(this, 'ECS-Cluster', {
-      vpc
+
+  //Bedrock Query lambda
+  const bedrock_query_lambda_function = new lambda.Function(this, 'bedrock-query-lambda', {
+    runtime: cdk.aws_lambda.Runtime.PYTHON_3_12,
+    code: cdk.aws_lambda.Code.fromAsset('../aws-Airport-Bot/lambda-bedrock-call'),
+    handler: 'index.lambda_handler',
+    environment: {
+      "AGENT_ID": agent.agentId,
+      "AGENT_ALIAS_ID": agent.aliasId ?? '',
+    },
+    memorySize: 500,
+    timeout: cdk.Duration.seconds(50),
+    description: "This lambda function processes incoming sms messages from user and makes bedrock calls",
+    ephemeralStorageSize: cdk.Size.mebibytes(512),
+    functionName: 'Airport-Bot-Bedrock-Query'
+  
     });
-
-    //Frontend for container-node
-    const securityGroup = new ec2.SecurityGroup(this, 'Airport-Bot-SG', {
-      vpc: vpc,
-      securityGroupName: 'Airport-Bot-sg',
-      description: 'Allow HTTP and HTTPS traffic',
-      allowAllOutbound: true
-    })
-    securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80))
-    securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443))
-    securityGroup.addEgressRule(ec2.Peer.anyIpv4(), ec2.Port.allTraffic())
-    
-    //Fargate Service - Load Balancer
-    const loadBalancedService = new ecs_patterns.ApplicationLoadBalancedFargateService(this, 'Fargate-service',{
-      cluster,
-      taskImageOptions: {
-        image: ecs.ContainerImage.fromRegistry(asset.imageUri),
-        environment: {
-          AGENT_ID: agent.agentId,
-          AGENT_ALIAS_ID: agent.aliasId ?? '',
-          PAGE_TITLE: page_title,
-          WEBSITE: website,
-        },
-        containerPort: 8501,
-        enableLogging: true,
-        
-      },
-      cpu: 4096,
-      ephemeralStorageGiB: 21,
-      memoryLimitMiB: 8192,
-      securityGroups: [securityGroup],
-      assignPublicIp: true,
-      publicLoadBalancer: true,
-      desiredCount: 1,
-      targetProtocol: cdk.aws_elasticloadbalancingv2.ApplicationProtocol.HTTP,
-    });
-
-    
-    const pl1 = new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ['ecr:GetAuthorizationToken','ecr:BatchCheckLayerAvailability', 'ecr:GetDownloadUrlForLayer', 'ecr:BatchGetImage'],
-      resources: ['*'],
-    })
-    loadBalancedService.service.taskDefinition.executionRole?.addToPrincipalPolicy(pl1);
-
-    const pl2 = new iam.PolicyStatement({
+    bedrock_query_lambda_function.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['bedrock:InvokeAgent'],
-      resources: [agent.aliasArn ?? '']//[alias.aliasArn]
-    })
-    loadBalancedService.service.taskDefinition.taskRole.addToPrincipalPolicy(pl2);
-  
+      resources: ["*"]
+    }));
 
-  // Cloud-Front Distribution
-  const cloudFrontCachePolicy = new cloudfront.CfnCachePolicy(this, 'CloudFrontCachePolicy', {
-    cachePolicyConfig: {
-      comment: 'Policy with caching disabled',
-      minTtl: 0,
-      maxTtl: 0,
-      parametersInCacheKeyAndForwardedToOrigin: {
-        queryStringsConfig: {
-          queryStringBehavior: 'none',
-        },
-        enableAcceptEncodingBrotli: false,
-        headersConfig: {
-          headerBehavior: 'none',
-        },
-        cookiesConfig: {
-          cookieBehavior: 'none',
-        },
-        enableAcceptEncodingGzip: false,
-      },
-      defaultTtl: 0,
-      name: 'CachingDisabled',
-    },
+  //Create HTTP POST api and get the url
+  const api_integration = new HttpLambdaIntegration('airport-bot-api-integration', bedrock_query_lambda_function);
+  const Httpapi = new cdk.aws_apigatewayv2.HttpApi(this, 'httpApi');
+  const Post_route = Httpapi.addRoutes({
+    path: '/',
+    methods: [cdk.aws_apigatewayv2.HttpMethod.POST],
+    integration: api_integration,
   });
-  cloudFrontCachePolicy.cfnOptions.deletionPolicy = cdk.CfnDeletionPolicy.DELETE;
-
-  const cloudFrontReqPolicy = new cloudfront.CfnOriginRequestPolicy(this, 'CloudFrontOriginRequestPolicy', {
-    originRequestPolicyConfig: {
-      queryStringsConfig: {
-        queryStringBehavior: 'all',
-      },
-      comment: 'Policy to forward all parameters in viewer requests',
-      headersConfig: {
-        headerBehavior: 'allViewer',
-      },
-      cookiesConfig: {
-        cookieBehavior: 'all',
-      },
-      name: 'AllViewer',
-    },
-  });
-  cloudFrontReqPolicy.cfnOptions.deletionPolicy = cdk.CfnDeletionPolicy.DELETE;
-
-  const cloudFrontDist = new cloudfront.CfnDistribution(this, 'CloudFrontDistribution', {
-    distributionConfig: {
-      logging: {
-        includeCookies: false,
-        bucket: '',
-        prefix: '',
-      },
-      comment: '',
-      defaultRootObject: '',
-      origins: [
-        {
-          connectionTimeout: 10,
-          originAccessControlId: '',
-          connectionAttempts: 3,
-          originCustomHeaders: [
-          ],
-          domainName: loadBalancedService.loadBalancer.loadBalancerDnsName,
-          originShield: {
-            enabled: false,
-          },
-          originPath: '',
-          id: loadBalancedService.loadBalancer.loadBalancerDnsName,
-          customOriginConfig: {
-            originKeepaliveTimeout: 5,
-            originReadTimeout: 30,
-            originSslProtocols: [
-              'SSLv3',
-              'TLSv1',
-              'TLSv1.1',
-              'TLSv1.2',
-            ],
-            httpsPort: 443,
-            httpPort: 80,
-            originProtocolPolicy: 'http-only',
-          },
-        },
-      ],
-      viewerCertificate: {
-        minimumProtocolVersion: 'TLSv1',
-        cloudFrontDefaultCertificate: true,
-      },
-      priceClass: 'PriceClass_100',
-      defaultCacheBehavior: {
-        compress: false,
-        functionAssociations: [
-        ],
-        lambdaFunctionAssociations: [
-        ],
-        targetOriginId: loadBalancedService.loadBalancer.loadBalancerDnsName,
-        viewerProtocolPolicy: 'redirect-to-https',
-        trustedSigners: [
-        ],
-        fieldLevelEncryptionId: '',
-        trustedKeyGroups: [
-        ],
-        allowedMethods: [
-          'HEAD',
-          'DELETE',
-          'POST',
-          'GET',
-          'OPTIONS',
-          'PUT',
-          'PATCH',
-        ],
-        cachedMethods: [
-          'HEAD',
-          'GET',
-          'OPTIONS',
-        ],
-        smoothStreaming: false,
-        originRequestPolicyId: cloudFrontReqPolicy.ref,
-        cachePolicyId: cloudFrontCachePolicy.ref,
-      },
-      staging: false,
-      customErrorResponses: [
-      ],
-      continuousDeploymentPolicyId: '',
-      originGroups: {
-        quantity: 0,
-        items: [
-        ],
-      },
-      enabled: true,
-      aliases: [
-      ],
-      ipv6Enabled: true,
-      webAclId: '',
-      httpVersion: 'http2and3',
-      restrictions: {
-        geoRestriction: {
-          locations: [
-          ],
-          restrictionType: 'none',
-        },
-      },
-      cacheBehaviors: [
-      ],
-    },
-  });
-  cloudFrontDist.cfnOptions.deletionPolicy = cdk.CfnDeletionPolicy.DELETE;
-
+  const url = Httpapi.url
   //Create an IAM role for Lambda function
   const sms_lambda_role = this.sms_lambda_role()
 
@@ -333,8 +143,7 @@ export class CdkTypescriptStack extends cdk.Stack {
     handler: 'index.lambda_handler',
     role: sms_lambda_role,
     environment: {
-      "AGENT_ID": agent.agentId,
-      "AGENT_ALIAS_ID": agent.aliasId ?? '',
+      "API": url ?? ''
     },
     memorySize: 500,
     timeout: cdk.Duration.seconds(50),
@@ -344,11 +153,227 @@ export class CdkTypescriptStack extends cdk.Stack {
   
     });
 
-    //Add existing sns topic as event source by name
-    const snsTopic = sns.Topic.fromTopicArn(this, 'airport-bot-sns-topic', `arn:aws:sns:${process.env.CDK_DEFAULT_REGION}:${process.env.CDK_DEFAULT_ACCOUNT}:Airport-Bot`);
+    //Create sns topic named Airport-bot
+    const snsTopic = new sns.Topic(this, 'airport-bot-sns-topic', {
+      displayName: 'Airport-Bot',
+      topicName: 'Airport-Bot',
+    });
 
     //Add event source to lambda function
     sms_lambda_function.addEventSource( new SnsEventSource(snsTopic));
+
+  // Frontend Container Image code
+  const asset = new DockerImageAsset(this, 'Airport-Bot-Image', {
+    directory: "../streamlit-app",
+  });
+
+  //VPC for the frontend
+  const vpc = new ec2.Vpc(this, 'VPC', {
+    vpcName: 'Airport-Bot-cdk-VPC',
+    maxAzs: 2,
+    natGateways: 0,
+    subnetConfiguration: [
+      {
+        cidrMask: 24,
+        name: 'Web',
+        subnetType: ec2.SubnetType.PUBLIC,
+      },],
+    
+  });
+  
+  //ECS Cluster
+  const cluster = new ecs.Cluster(this, 'ECS-Cluster', {
+    vpc
+  });
+
+  //Frontend for container-node
+  const securityGroup = new ec2.SecurityGroup(this, 'Airport-Bot-SG', {
+    vpc: vpc,
+    securityGroupName: 'Airport-Bot-sg',
+    description: 'Allow HTTP and HTTPS traffic',
+    allowAllOutbound: true
+  })
+  securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80))
+  securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443))
+  securityGroup.addEgressRule(ec2.Peer.anyIpv4(), ec2.Port.allTraffic())
+  
+  //Fargate Service - Load Balancer
+  const loadBalancedService = new ecs_patterns.ApplicationLoadBalancedFargateService(this, 'Fargate-service',{
+    cluster,
+    taskImageOptions: {
+      image: ecs.ContainerImage.fromRegistry(asset.imageUri),
+      environment: {
+        AGENT_ID: agent.agentId,
+        AGENT_ALIAS_ID: agent.aliasId ?? '',
+        PAGE_TITLE: page_title,
+        WEBSITE: website,
+        API: url ?? '',
+      },
+      containerPort: 8501,
+      enableLogging: true,
+      
+    },
+    cpu: 4096,
+    ephemeralStorageGiB: 21,
+    memoryLimitMiB: 8192,
+    securityGroups: [securityGroup],
+    assignPublicIp: true,
+    publicLoadBalancer: true,
+    desiredCount: 1,
+    targetProtocol: cdk.aws_elasticloadbalancingv2.ApplicationProtocol.HTTP,
+  });
+
+  
+  const pl1 = new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['ecr:GetAuthorizationToken','ecr:BatchCheckLayerAvailability', 'ecr:GetDownloadUrlForLayer', 'ecr:BatchGetImage'],
+    resources: ['*'],
+  })
+  loadBalancedService.service.taskDefinition.executionRole?.addToPrincipalPolicy(pl1);  
+
+
+// Cloud-Front Distribution
+const cloudFrontCachePolicy = new cloudfront.CfnCachePolicy(this, 'CloudFrontCachePolicy', {
+  cachePolicyConfig: {
+    comment: 'Policy with caching disabled',
+    minTtl: 0,
+    maxTtl: 0,
+    parametersInCacheKeyAndForwardedToOrigin: {
+      queryStringsConfig: {
+        queryStringBehavior: 'none',
+      },
+      enableAcceptEncodingBrotli: false,
+      headersConfig: {
+        headerBehavior: 'none',
+      },
+      cookiesConfig: {
+        cookieBehavior: 'none',
+      },
+      enableAcceptEncodingGzip: false,
+    },
+    defaultTtl: 0,
+    name: 'CachingDisabled',
+  },
+});
+cloudFrontCachePolicy.cfnOptions.deletionPolicy = cdk.CfnDeletionPolicy.DELETE;
+
+const cloudFrontReqPolicy = new cloudfront.CfnOriginRequestPolicy(this, 'CloudFrontOriginRequestPolicy', {
+  originRequestPolicyConfig: {
+    queryStringsConfig: {
+      queryStringBehavior: 'all',
+    },
+    comment: 'Policy to forward all parameters in viewer requests',
+    headersConfig: {
+      headerBehavior: 'allViewer',
+    },
+    cookiesConfig: {
+      cookieBehavior: 'all',
+    },
+    name: 'AllViewer',
+  },
+});
+cloudFrontReqPolicy.cfnOptions.deletionPolicy = cdk.CfnDeletionPolicy.DELETE;
+
+const cloudFrontDist = new cloudfront.CfnDistribution(this, 'CloudFrontDistribution', {
+  distributionConfig: {
+    logging: {
+      includeCookies: false,
+      bucket: '',
+      prefix: '',
+    },
+    comment: '',
+    defaultRootObject: '',
+    origins: [
+      {
+        connectionTimeout: 10,
+        originAccessControlId: '',
+        connectionAttempts: 3,
+        originCustomHeaders: [
+        ],
+        domainName: loadBalancedService.loadBalancer.loadBalancerDnsName,
+        originShield: {
+          enabled: false,
+        },
+        originPath: '',
+        id: loadBalancedService.loadBalancer.loadBalancerDnsName,
+        customOriginConfig: {
+          originKeepaliveTimeout: 5,
+          originReadTimeout: 30,
+          originSslProtocols: [
+            'SSLv3',
+            'TLSv1',
+            'TLSv1.1',
+            'TLSv1.2',
+          ],
+          httpsPort: 443,
+          httpPort: 80,
+          originProtocolPolicy: 'http-only',
+        },
+      },
+    ],
+    viewerCertificate: {
+      minimumProtocolVersion: 'TLSv1',
+      cloudFrontDefaultCertificate: true,
+    },
+    priceClass: 'PriceClass_100',
+    defaultCacheBehavior: {
+      compress: false,
+      functionAssociations: [
+      ],
+      lambdaFunctionAssociations: [
+      ],
+      targetOriginId: loadBalancedService.loadBalancer.loadBalancerDnsName,
+      viewerProtocolPolicy: 'redirect-to-https',
+      trustedSigners: [
+      ],
+      fieldLevelEncryptionId: '',
+      trustedKeyGroups: [
+      ],
+      allowedMethods: [
+        'HEAD',
+        'DELETE',
+        'POST',
+        'GET',
+        'OPTIONS',
+        'PUT',
+        'PATCH',
+      ],
+      cachedMethods: [
+        'HEAD',
+        'GET',
+        'OPTIONS',
+      ],
+      smoothStreaming: false,
+      originRequestPolicyId: cloudFrontReqPolicy.ref,
+      cachePolicyId: cloudFrontCachePolicy.ref,
+    },
+    staging: false,
+    customErrorResponses: [
+    ],
+    continuousDeploymentPolicyId: '',
+    originGroups: {
+      quantity: 0,
+      items: [
+      ],
+    },
+    enabled: true,
+    aliases: [
+    ],
+    ipv6Enabled: true,
+    webAclId: '',
+    httpVersion: 'http2and3',
+    restrictions: {
+      geoRestriction: {
+        locations: [
+        ],
+        restrictionType: 'none',
+      },
+    },
+    cacheBehaviors: [
+    ],
+  },
+});
+cloudFrontDist.cfnOptions.deletionPolicy = cdk.CfnDeletionPolicy.DELETE;
 
   new cdk.CfnOutput(this, 'Cloud-Front-Domain', {
     value: cloudFrontDist.attrDomainName
@@ -473,7 +498,7 @@ export class CdkTypescriptStack extends cdk.Stack {
    // Policy Statement 3
    const lambdaPolStat3 = new iam.PolicyStatement({
      effect: iam.Effect.ALLOW,
-     actions: ['bedrock:InvokeAgent', 'mobiletargeting:SendMessages'],
+     actions: ['mobiletargeting:SendMessages'],
      resources: ['*']
    });
  

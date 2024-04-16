@@ -1,3 +1,9 @@
+---
+runme:
+  id: 01HVMF913NM0X37V35G7EAK3AJ
+  version: v3
+---
+
 # Airport-Bot-GenerativeAI
 
 GenerativeAI chatbot framework for Airports. This bot can provide all sorts of information which is publically available on the websites.
@@ -44,6 +50,6 @@ Check that your system has access to make AWS calls , then run the cdk stack.
 __page_title__: Set page title of the frontend. __Mandatory__
 
 ```bash {"id":"01HTZEMSE9DJB4D5JMC5ZBZ80K"}
-  cdk synth --context kendraIndexId=123456677890 --context website='abc.com' --context page_title='Phoenix Airport Bot'
-  cdk deploy --context kendraIndexId=123456677890 --context website='abc.com' --context page_title='Phoenix Airport Bot'
+ cdk bootstrap 
+ cdk deploy --context kendraIndexId=123456677890 --context website='abc.com' --context page_title='Airport Bot'
 ```

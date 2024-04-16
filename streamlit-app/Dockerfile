@@ -6,6 +6,6 @@ COPY requirements.txt .
 
 RUN pip3 install -r requirements.txt
 
-COPY app.py InvokeAgent.py log_setup.py ./
+COPY app.py log_setup.py ./
 
 CMD ["streamlit", "run", "app.py"]
