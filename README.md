@@ -51,3 +51,6 @@ __page_title__: Set page title of the frontend. __Mandatory__
  cdk bootstrap 
  cdk deploy --context kendraIndexId=123456677890 --context website='abc.com' --context page_title='Airport Bot'
 ```
+## Creators
+- [@Dhairya Dudhatra](https://github.com/Dhairya-Dudhatra)
+- [@Arun Arunachalam](https://github.com/awsaruna)
